@@ -67,11 +67,17 @@ The schema file also includes sample data for testing.
 Create a `.env` file in the project root:
 
 ```env
+# Database
 DB_HOST=localhost
 DB_NAME=server_management
 DB_USER=postgres
 DB_PASSWORD=your_password_here
 DB_PORT=5432
+
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FILE=logs/app.log
 ```
 
 ## Running the Application
@@ -165,7 +171,6 @@ curl -X DELETE "http://localhost:8000/servers/1"
 ```
 
 ## Project Structure
-
 ```
 server-management-api/
 │
@@ -174,14 +179,19 @@ server-management-api/
 │   ├── main.py              # FastAPI application entry point
 │   ├── database.py          # Database connection management
 │   ├── models.py            # Pydantic models for validation
+│   ├── constants.py         # Database table constants
+│   ├── logging_config.py    # Logging configuration
 │   └── routers/
 │       ├── __init__.py
 │       └── servers.py       # Server endpoint definitions
 │
+├── logs/
+│   └── app.log              # Application logs (gitignored)
+│
 ├── sql/
 │   └── schema.sql           # Database schema and sample data
 │
-├── .env                     # Environment variables (not in git)
+├── .env                     # Environment variables (gitignored)
 ├── .gitignore
 ├── requirements.txt         # Python dependencies
 └── README.md
@@ -233,6 +243,57 @@ You can test the API using:
 2. **curl** commands (see examples above)
 3. **Postman** or similar API clients
 4. **Python requests library**
+
+## Logging
+
+The application includes comprehensive logging for monitoring and debugging.
+
+### Log Configuration
+
+Configure logging in your `.env` file:
+```env
+# Logging (optional)
+LOG_LEVEL=INFO          # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_FILE=logs/app.log   # Leave empty to disable file logging
+```
+
+### Log Levels
+
+- **DEBUG**: Detailed information for diagnosing problems (shows all query details)
+- **INFO**: General informational messages (default, recommended for production)
+- **WARNING**: Warning messages for unexpected events
+- **ERROR**: Error messages for serious problems
+- **CRITICAL**: Critical errors that may cause the application to stop
+
+### Log Output
+
+Logs are written to two locations:
+
+1. **Console/Terminal** - All logs appear in the terminal where you run uvicorn
+2. **Log File** - Persistent logs saved to `logs/app.log` (if configured)
+
+### Viewing Logs
+
+**View logs in real-time:**
+```bash
+tail -f logs/app.log
+```
+
+### Example Log Output
+```
+2024-05-28 15:30:52 - INFO - Fetching servers with skip=0, limit=100
+2024-05-28 15:30:52 - INFO - Retrieved 3 servers
+2024-05-28 15:31:10 - INFO - Creating server: hostname=newserver.local, datacenter_id=1
+2024-05-28 15:31:10 - INFO - Created server with id=4, hostname=newserver.local
+2024-05-28 15:31:45 - WARNING - Server with id=99 not found
+```
+
+## Important Files
+
+The following files are ignored by git (see `.gitignore`):
+- `.env` - Contains sensitive database credentials
+- `logs/` - Log files can grow large and contain sensitive data
+- `__pycache__/` and `*.pyc` - Python bytecode files
 
 ## Development
 
