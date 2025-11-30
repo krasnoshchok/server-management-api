@@ -109,7 +109,10 @@ def create_server(server: ServerBase):
     Add a new server to a datacenter.
 
     - **hostname**: Server hostname (required)
-    - **configuration**: JSON configuration object (optional)
+    - **configuration**: Server hardware configuration (optional)
+        - cpu_cores: 1-128 (must be power of 2)
+        - ram_gb: 1-1024
+        - disk_gb: 10-10000
     - **datacenter_id**: ID of the datacenter (required)
     """
     logger.info("Creating server: hostname=%s, datacenter_id=%s",
@@ -121,10 +124,14 @@ def create_server(server: ServerBase):
             cur.execute(f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
                         (server.datacenter_id,))
             if not cur.fetchone():
+                logger.error("Datacenter with id=%s does not exist", server.datacenter_id)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Datacenter with id {server.datacenter_id} does not exist"
                 )
+
+            # Convert Pydantic model to dict for storage
+            config_dict = server.configuration.model_dump(exclude_none=True)
 
             # Insert server
             cur.execute(f"""
@@ -134,7 +141,7 @@ def create_server(server: ServerBase):
                           created_at, modified_at
             """, (
                 server.hostname,
-                psycopg2.extras.Json(server.configuration),
+                psycopg2.extras.Json(config_dict),
                 server.datacenter_id
             ))
 

@@ -125,6 +125,13 @@ curl -X POST "http://localhost:8000/servers/" \
   }'
 ```
 
+Resource Limits
+The server configuration now enforces hardware limits:
+cpu_cores must be between 1 and 128
+ram_gb must be between 1 and 4096
+Invalid values will result in a 400 Bad Request error.
+
+
 ### Get all servers
 
 Get first 100 servers (default):
