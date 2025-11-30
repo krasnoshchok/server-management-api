@@ -240,51 +240,41 @@ def update_server(server_id: int, server: ServerUpdate):
 def delete_server(server_id: int):
     """
     Delete a server by ID.
-
     This will also delete all switch associations for this server.
-
-    - **server_id**: ID of the server to delete
     """
     logger.info("Deleting server id=%s", server_id)
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Check if server exists
-            cur.execute(
-                f"SELECT id, hostname FROM {TABLE_SERVER} WHERE id = %s",
-                (server_id,)
-            )
-
-            server = cur.fetchone()  # ← Fetch once
-            if not server:  # ← Check the variable, not fetchone() again!
-                logger.warning("Server with id=%s not found for deletion", server_id)
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Server with id {server_id} not found"
-                )
-
-            # Count switch associations before deleting
-            cur.execute(
-                f"SELECT COUNT(*) as count FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
-                (server_id,)
-            )
-            association_count = cur.fetchone()['count']
-
-            if association_count > 0:
-                logger.info("Deleting %s switch associations for server id=%s",
-                            association_count, server_id)
-
-            # Delete all switch-to-server associations
+            # 1. Delete associations first (Blind delete)
             cur.execute(
                 f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
                 (server_id,)
             )
+            association_count = cur.rowcount  # Optimization: Check count after delete
 
-            # Then delete the server itself
+            if association_count > 0:
+                logger.info("Deleted %s switch associations for server id=%s",
+                            association_count, server_id)
+
+            # 2. Delete the server
             cur.execute(
                 f"DELETE FROM {TABLE_SERVER} WHERE id = %s",
                 (server_id,)
             )
 
-            logger.info("Deleted server id=%s, hostname=%s",
-                        server_id, server['hostname'])
+            # 3. Check if any row was actually deleted to handle 404
+            if cur.rowcount == 0:
+                # If we didn't delete anything here, the server didn't exist
+                logger.warning("Server with id=%s not found for deletion", server_id)
+                # Note: We might have deleted orphan associations above,
+                # but usually FK constraints prevent that scenario.
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Server with id {server_id} not found"
+                )
+
+            conn.commit()
+
+            # Optimization: We removed the initial SELECT, so we cannot log 'hostname' anymore.
+            logger.info("Deleted server id=%s", server_id)
