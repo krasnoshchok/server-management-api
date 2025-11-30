@@ -46,8 +46,7 @@ def get_all_servers(skip: int = 0, limit: int = 100):
     Returns a paginated list of servers.
     """
     # Validate limit to prevent abuse
-    if limit > 1000:
-        limit = 1000
+    limit = min(limit, 1000)
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
