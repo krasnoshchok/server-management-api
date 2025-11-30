@@ -118,45 +118,46 @@ def create_server(server: ServerBase):
 
 @router.put("/{server_id}", response_model=ServerResponse)
 def update_server(server_id: int, server: ServerUpdate):
-    """
-    Update an existing server.
+    """Update an existing server."""
 
-    - **server_id**: ID of the server to update
-    - All fields are optional, only provided fields will be updated
-    """
+    # Define allowed fields with their column names
+    allowed_fields = {
+        'hostname': 'hostname',
+        'configuration': 'configuration',
+        'datacenter_id': 'datacenter_id'
+    }
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Check if server exists
-            cur.execute("SELECT id FROM public.server WHERE id = %s", (server_id,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Server with id {server_id} not found"
-                )
-
-            # Build dynamic update query
+            # Build update fields and params
             update_fields = []
             params = []
 
-            if server.hostname is not None:
-                update_fields.append("hostname = %s")
-                params.append(server.hostname)
+            # Get only the fields that were provided (not None)
+            update_data = server.model_dump(exclude_unset=True)
 
-            if server.configuration is not None:
-                update_fields.append("configuration = %s")
-                params.append(psycopg2.extras.Json(server.configuration))
+            for field_name, value in update_data.items():
+                if field_name in allowed_fields:
+                    column_name = allowed_fields[field_name]
 
-            if server.datacenter_id is not None:
-                # Check if datacenter exists
-                cur.execute("SELECT id FROM public.datacenter WHERE id = %s",
-                            (server.datacenter_id,))
-                if not cur.fetchone():
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Datacenter with id {server.datacenter_id} does not exist"
-                    )
-                update_fields.append("datacenter_id = %s")
-                params.append(server.datacenter_id)
+                    # Special handling for datacenter_id validation
+                    if field_name == 'datacenter_id':
+                        cur.execute(
+                            "SELECT id FROM public.datacenter WHERE id = %s",
+                            (value,)
+                        )
+                        if not cur.fetchone():
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Datacenter with id {value} does not exist"
+                            )
+
+                    # Special handling for configuration JSON
+                    if field_name == 'configuration':
+                        value = psycopg2.extras.Json(value)
+
+                    update_fields.append(f"{column_name} = %s")
+                    params.append(value)
 
             if not update_fields:
                 raise HTTPException(
@@ -164,9 +165,11 @@ def update_server(server_id: int, server: ServerUpdate):
                     detail="No fields to update"
                 )
 
+            # Add modified timestamp and server_id
             update_fields.append("modified_at = NOW()")
             params.append(server_id)
 
+            # Now it's safe because we've validated all column names
             query = f"""
                 UPDATE public.server
                 SET {', '.join(update_fields)}
@@ -177,6 +180,13 @@ def update_server(server_id: int, server: ServerUpdate):
 
             cur.execute(query, params)
             updated_server = cur.fetchone()
+
+            if not updated_server:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Server with id {server_id} not found"
+                )
+
             return updated_server
 
 
