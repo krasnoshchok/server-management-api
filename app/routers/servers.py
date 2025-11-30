@@ -119,44 +119,37 @@ def create_server(server: ServerBase):
                 server.hostname, server.datacenter_id)
 
     with get_db_connection() as conn:
-        try:
-            with conn.cursor() as cur:
-                # Check if datacenter exists
-                cur.execute(f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
-                            (server.datacenter_id,))
-                if not cur.fetchone():
-                    logger.error("Datacenter with id=%s does not exist", server.datacenter_id)
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Datacenter with id {server.datacenter_id} does not exist"
-                    )
+        with conn.cursor() as cur:
+            # Check if datacenter exists
+            cur.execute(f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
+                        (server.datacenter_id,))
+            if not cur.fetchone():
+                logger.error("Datacenter with id=%s does not exist", server.datacenter_id)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Datacenter with id {server.datacenter_id} does not exist"
+                )
 
-                # Convert Pydantic model to dict for storage
-                config_dict = server.configuration.model_dump(exclude_none=True)
+            # Convert Pydantic model to dict for storage
+            config_dict = server.configuration.model_dump(exclude_none=True)
 
-                # Insert server
-                cur.execute(f"""
-                    INSERT INTO {TABLE_SERVER} (hostname, configuration, datacenter_id)
-                    VALUES (%s, %s, %s)
-                    RETURNING id, hostname, configuration, datacenter_id, 
-                              created_at, modified_at
-                """, (
-                    server.hostname,
-                    psycopg2.extras.Json(config_dict),
-                    server.datacenter_id
-                ))
+            # Insert server
+            cur.execute(f"""
+                INSERT INTO {TABLE_SERVER} (hostname, configuration, datacenter_id)
+                VALUES (%s, %s, %s)
+                RETURNING id, hostname, configuration, datacenter_id, 
+                          created_at, modified_at
+            """, (
+                server.hostname,
+                psycopg2.extras.Json(config_dict),
+                server.datacenter_id
+            ))
 
-                new_server = cur.fetchone()
-
-            conn.commit()
+            new_server = cur.fetchone()
             logger.info("Created server with id=%s, hostname=%s",
                         new_server['id'], new_server['hostname'])
 
             return new_server
-        except Exception as e:
-            logger.error("Error creating server: %s", e)
-            conn.rollback()
-            raise
 
 
 @router.put("/{server_id}", response_model=ServerResponse)
@@ -172,82 +165,75 @@ def update_server(server_id: int, server: ServerUpdate):
     }
 
     with get_db_connection() as conn:
-        try:
-            with conn.cursor() as cur:
-                # Build update fields and params
-                update_fields = []
-                params = []
+        with conn.cursor() as cur:
+            # Build update fields and params
+            update_fields = []
+            params = []
 
-                # Get only the fields that were provided (not None)
-                update_data = server.model_dump(exclude_unset=True)
-                logger.debug("Update data for server id=%s: %s", server_id, update_data)
+            # Get only the fields that were provided (not None)
+            update_data = server.model_dump(exclude_unset=True)
+            logger.debug("Update data for server id=%s: %s", server_id, update_data)
 
-                for field_name, value in update_data.items():
-                    if field_name in allowed_fields:
-                        column_name = allowed_fields[field_name]
+            for field_name, value in update_data.items():
+                if field_name in allowed_fields:
+                    column_name = allowed_fields[field_name]
 
-                        # Special handling for datacenter_id validation
-                        if field_name == 'datacenter_id':
-                            cur.execute(
-                                f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
-                                (value,)
+                    # Special handling for datacenter_id validation
+                    if field_name == 'datacenter_id':
+                        cur.execute(
+                            f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
+                            (value,)
+                        )
+                        if not cur.fetchone():
+                            logger.error("Datacenter with id=%s does not exist", value)
+
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail=f"Datacenter with id {value} does not exist"
                             )
-                            if not cur.fetchone():
-                                logger.error("Datacenter with id=%s does not exist", value)
 
-                                raise HTTPException(
-                                    status_code=status.HTTP_400_BAD_REQUEST,
-                                    detail=f"Datacenter with id {value} does not exist"
-                                )
+                    # Special handling for configuration JSON
+                    if field_name == 'configuration':
+                        value = psycopg2.extras.Json(value)
 
-                        # Special handling for configuration JSON
-                        if field_name == 'configuration':
-                            value = psycopg2.extras.Json(value)
+                    update_fields.append(f"{column_name} = %s")
+                    params.append(value)
 
-                        update_fields.append(f"{column_name} = %s")
-                        params.append(value)
+            if not update_fields:
+                logger.warning("No fields to update for server id=%s", server_id)
 
-                if not update_fields:
-                    logger.warning("No fields to update for server id=%s", server_id)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No fields to update"
+                )
 
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="No fields to update"
-                    )
+            # Add modified timestamp and server_id
+            update_fields.append("modified_at = NOW()")
+            params.append(server_id)
 
-                # Add modified timestamp and server_id
-                update_fields.append("modified_at = NOW()")
-                params.append(server_id)
+            # Now it's safe because we've validated all column names
+            query = f"""
+                UPDATE {TABLE_SERVER}
+                SET {', '.join(update_fields)}
+                WHERE id = %s
+                RETURNING id, hostname, configuration, datacenter_id,
+                          created_at, modified_at
+            """
 
-                # Now it's safe because we've validated all column names
-                query = f"""
-                    UPDATE {TABLE_SERVER}
-                    SET {', '.join(update_fields)}
-                    WHERE id = %s
-                    RETURNING id, hostname, configuration, datacenter_id,
-                              created_at, modified_at
-                """
+            cur.execute(query, params)
+            updated_server = cur.fetchone()
 
-                cur.execute(query, params)
-                updated_server = cur.fetchone()
+            if not updated_server:
+                logger.warning("Server with id=%s not found for update", server_id)
 
-                if not updated_server:
-                    logger.warning("Server with id=%s not found for update", server_id)
-
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Server with id {server_id} not found"
-                    )
-
-            conn.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Server with id {server_id} not found"
+                )
 
             logger.info("Updated server id=%s, hostname=%s",
                         updated_server['id'], updated_server['hostname'])
             return updated_server
-        except Exception as e:
-            logger.error("Error updating the server: %s", e)
-            conn.rollback()
-            raise
 
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -259,41 +245,36 @@ def delete_server(server_id: int):
     logger.info("Deleting server id=%s", server_id)
 
     with get_db_connection() as conn:
-        try:
-            with conn.cursor() as cur:
-                # 1. Delete associations first (Blind delete)
-                cur.execute(
-                    f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
-                    (server_id,)
+        with conn.cursor() as cur:
+            # 1. Delete associations first (Blind delete)
+            cur.execute(
+                f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
+                (server_id,)
+            )
+            association_count = cur.rowcount  # Optimization: Check count after delete
+
+            if association_count > 0:
+                logger.info("Deleted %s switch associations for server id=%s",
+                            association_count, server_id)
+
+            # 2. Delete the server
+            cur.execute(
+                f"DELETE FROM {TABLE_SERVER} WHERE id = %s",
+                (server_id,)
+            )
+
+            # 3. Check if any row was actually deleted to handle 404
+            if cur.rowcount == 0:
+                # If we didn't delete anything here, the server didn't exist
+                logger.warning("Server with id=%s not found for deletion", server_id)
+                # Note: We might have deleted orphan associations above,
+                # but usually FK constraints prevent that scenario.
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Server with id {server_id} not found"
                 )
-                association_count = cur.rowcount  # Optimization: Check count after delete
-
-                if association_count > 0:
-                    logger.info("Deleted %s switch associations for server id=%s",
-                                association_count, server_id)
-
-                # 2. Delete the server
-                cur.execute(
-                    f"DELETE FROM {TABLE_SERVER} WHERE id = %s",
-                    (server_id,)
-                )
-
-                # 3. Check if any row was actually deleted to handle 404
-                if cur.rowcount == 0:
-                    # If we didn't delete anything here, the server didn't exist
-                    logger.warning("Server with id=%s not found for deletion", server_id)
-                    # Note: We might have deleted orphan associations above,
-                    # but usually FK constraints prevent that scenario.
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"Server with id {server_id} not found"
-                    )
 
             conn.commit()
 
             # Optimization: We removed the initial SELECT, so we cannot log 'hostname' anymore.
             logger.info("Deleted server id=%s", server_id)
-        except Exception as e:
-            logger.error("Error deleting server: %s", e)
-            conn.rollback()
-            raise
