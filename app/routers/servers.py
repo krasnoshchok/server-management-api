@@ -36,12 +36,19 @@ router = APIRouter(
 
 
 @router.get("/", response_model=List[ServerResponse])
-def get_all_servers():
+def get_all_servers(skip: int = 0, limit: int = 100):
     """
-    Retrieve all servers from the database.
+    Retrieve servers from the database with pagination.
 
-    Returns a list of all servers with their configurations and datacenter assignments.
+    - **skip**: Number of records to skip (default: 0)
+    - **limit**: Maximum number of records to return (default: 100, max: 1000)
+
+    Returns a paginated list of servers.
     """
+    # Validate limit to prevent abuse
+    if limit > 1000:
+        limit = 1000
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -49,7 +56,8 @@ def get_all_servers():
                        created_at, modified_at
                 FROM public.server
                 ORDER BY id
-            """)
+                LIMIT %s OFFSET %s
+            """, (limit, skip))
             servers = cur.fetchall()
             return servers
 

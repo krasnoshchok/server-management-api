@@ -121,8 +121,24 @@ curl -X POST "http://localhost:8000/servers/" \
 
 ### Get all servers
 
+Get first 100 servers (default):
 ```bash
 curl -X GET "http://localhost:8000/servers/"
+```
+
+Get first 10 servers:
+```bash
+curl -X GET "http://localhost:8000/servers/?limit=10"
+```
+
+Get servers 11-20 (skip first 10, return next 10):
+```bash
+curl -X GET "http://localhost:8000/servers/?skip=10&limit=10"
+```
+
+Get servers 101-200:
+```bash
+curl -X GET "http://localhost:8000/servers/?skip=100&limit=100"
 ```
 
 ### Get a specific server
