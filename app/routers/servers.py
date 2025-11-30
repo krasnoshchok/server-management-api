@@ -195,17 +195,31 @@ def delete_server(server_id: int):
     """
     Delete a server by ID.
 
+    This will also delete all switch associations for this server.
+
     - **server_id**: ID of the server to delete
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             # Check if server exists
-            cur.execute("SELECT id FROM public.server WHERE id = %s", (server_id,))
+            cur.execute(
+                "SELECT id FROM public.server WHERE id = %s",
+                (server_id,)
+            )
             if not cur.fetchone():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Server with id {server_id} not found"
                 )
 
-            # Delete server
-            cur.execute("DELETE FROM public.server WHERE id = %s", (server_id,))
+            # First, delete all switch-to-server associations
+            cur.execute(
+                "DELETE FROM public.switch_to_server WHERE server_id = %s",
+                (server_id,)
+            )
+
+            # Then delete the server itself
+            cur.execute(
+                "DELETE FROM public.server WHERE id = %s",
+                (server_id,)
+            )
