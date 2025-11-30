@@ -28,6 +28,7 @@ import psycopg2.extras
 
 from app.database import get_db_connection
 from app.models import ServerBase, ServerUpdate, ServerResponse
+from app.constants import TABLE_SERVER, TABLE_DATACENTER, TABLE_SWITCH_TO_SERVER
 
 router = APIRouter(
     prefix="/servers",
@@ -50,10 +51,10 @@ def get_all_servers(skip: int = 0, limit: int = 100):
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT id, hostname, configuration, datacenter_id, 
                        created_at, modified_at
-                FROM public.server
+                FROM {TABLE_SERVER}
                 ORDER BY id
                 LIMIT %s OFFSET %s
             """, (limit, skip))
@@ -70,10 +71,10 @@ def get_server(server_id: int):
     """
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT id, hostname, configuration, datacenter_id,
                        created_at, modified_at
-                FROM public.server
+                FROM {TABLE_SERVER}
                 WHERE id = %s
             """, (server_id,))
             server = cur.fetchone()
@@ -99,7 +100,7 @@ def create_server(server: ServerBase):
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             # Check if datacenter exists
-            cur.execute("SELECT id FROM public.datacenter WHERE id = %s",
+            cur.execute(f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
                         (server.datacenter_id,))
             if not cur.fetchone():
                 raise HTTPException(
@@ -108,8 +109,8 @@ def create_server(server: ServerBase):
                 )
 
             # Insert server
-            cur.execute("""
-                INSERT INTO public.server (hostname, configuration, datacenter_id)
+            cur.execute(f"""
+                INSERT INTO {TABLE_SERVER} (hostname, configuration, datacenter_id)
                 VALUES (%s, %s, %s)
                 RETURNING id, hostname, configuration, datacenter_id, 
                           created_at, modified_at
@@ -150,7 +151,7 @@ def update_server(server_id: int, server: ServerUpdate):
                     # Special handling for datacenter_id validation
                     if field_name == 'datacenter_id':
                         cur.execute(
-                            "SELECT id FROM public.datacenter WHERE id = %s",
+                            f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
                             (value,)
                         )
                         if not cur.fetchone():
@@ -178,7 +179,7 @@ def update_server(server_id: int, server: ServerUpdate):
 
             # Now it's safe because we've validated all column names
             query = f"""
-                UPDATE public.server
+                UPDATE {TABLE_SERVER}
                 SET {', '.join(update_fields)}
                 WHERE id = %s
                 RETURNING id, hostname, configuration, datacenter_id,
@@ -210,7 +211,7 @@ def delete_server(server_id: int):
         with conn.cursor() as cur:
             # Check if server exists
             cur.execute(
-                "SELECT id FROM public.server WHERE id = %s",
+                f"SELECT id FROM {TABLE_SERVER} WHERE id = %s",
                 (server_id,)
             )
             if not cur.fetchone():
@@ -221,12 +222,12 @@ def delete_server(server_id: int):
 
             # First, delete all switch-to-server associations
             cur.execute(
-                "DELETE FROM public.switch_to_server WHERE server_id = %s",
+                f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
                 (server_id,)
             )
 
             # Then delete the server itself
             cur.execute(
-                "DELETE FROM public.server WHERE id = %s",
+                f"DELETE FROM {TABLE_SERVER} WHERE id = %s",
                 (server_id,)
             )
