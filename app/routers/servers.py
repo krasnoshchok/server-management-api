@@ -22,6 +22,7 @@ Dependencies:
 - app.database: Provides the database connection utility (`get_db_connection`).
 - app.models: Defines the data structures for server requests and responses.
 """
+import logging
 from typing import List
 from fastapi import APIRouter, HTTPException, status
 import psycopg2.extras
@@ -34,6 +35,10 @@ router = APIRouter(
     prefix="/servers",
     tags=["servers"]
 )
+
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 
 @router.get("/", response_model=List[ServerResponse])
@@ -49,6 +54,9 @@ def get_all_servers(skip: int = 0, limit: int = 100):
     # Validate limit to prevent abuse
     limit = min(limit, 1000)
 
+    logging.info("Fetching servers with skip=%(skip)s, limit=%(limit)s",
+                 {"skip": skip, "limit": limit})
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""
@@ -59,6 +67,9 @@ def get_all_servers(skip: int = 0, limit: int = 100):
                 LIMIT %s OFFSET %s
             """, (limit, skip))
             servers = cur.fetchall()
+
+            logger.info("Retrieved %s servers", len(servers))
+
             return servers
 
 
@@ -69,6 +80,8 @@ def get_server(server_id: int):
 
     - **server_id**: The ID of the server to retrieve
     """
+    logger.info("Fetching server with id=%s", server_id)
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(f"""
@@ -80,11 +93,13 @@ def get_server(server_id: int):
             server = cur.fetchone()
 
             if not server:
+                logger.warning("Server with id=%s not found", server_id)
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Server with id {server_id} not found"
                 )
 
+            logger.info("Retrieved server: %s (id=%s)", server['hostname'], server_id)
             return server
 
 
@@ -97,6 +112,9 @@ def create_server(server: ServerBase):
     - **configuration**: JSON configuration object (optional)
     - **datacenter_id**: ID of the datacenter (required)
     """
+    logger.info("Creating server: hostname=%s, datacenter_id=%s",
+                server.hostname, server.datacenter_id)
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             # Check if datacenter exists
@@ -121,12 +139,16 @@ def create_server(server: ServerBase):
             ))
 
             new_server = cur.fetchone()
+            logger.info("Created server with id=%s, hostname=%s",
+                        new_server['id'], new_server['hostname'])
+
             return new_server
 
 
 @router.put("/{server_id}", response_model=ServerResponse)
 def update_server(server_id: int, server: ServerUpdate):
     """Update an existing server."""
+    logger.info("Updating server id=%s", server_id)
 
     # Define allowed fields with their column names
     allowed_fields = {
@@ -143,6 +165,7 @@ def update_server(server_id: int, server: ServerUpdate):
 
             # Get only the fields that were provided (not None)
             update_data = server.model_dump(exclude_unset=True)
+            logger.debug("Update data for server id=%s: %s", server_id, update_data)
 
             for field_name, value in update_data.items():
                 if field_name in allowed_fields:
@@ -155,6 +178,8 @@ def update_server(server_id: int, server: ServerUpdate):
                             (value,)
                         )
                         if not cur.fetchone():
+                            logger.error("Datacenter with id=%s does not exist", value)
+
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail=f"Datacenter with id {value} does not exist"
@@ -168,6 +193,8 @@ def update_server(server_id: int, server: ServerUpdate):
                     params.append(value)
 
             if not update_fields:
+                logger.warning("No fields to update for server id=%s", server_id)
+
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="No fields to update"
@@ -190,11 +217,15 @@ def update_server(server_id: int, server: ServerUpdate):
             updated_server = cur.fetchone()
 
             if not updated_server:
+                logger.warning("Server with id=%s not found for update", server_id)
+
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Server with id {server_id} not found"
                 )
 
+            logger.info("Updated server id=%s, hostname=%s",
+                        updated_server['id'], updated_server['hostname'])
             return updated_server
 
 
@@ -207,20 +238,36 @@ def delete_server(server_id: int):
 
     - **server_id**: ID of the server to delete
     """
+    logger.info("Deleting server id=%s", server_id)
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             # Check if server exists
             cur.execute(
-                f"SELECT id FROM {TABLE_SERVER} WHERE id = %s",
+                f"SELECT id, hostname FROM {TABLE_SERVER} WHERE id = %s",
                 (server_id,)
             )
-            if not cur.fetchone():
+
+            server = cur.fetchone()  # ← Fetch once
+            if not server:  # ← Check the variable, not fetchone() again!
+                logger.warning("Server with id=%s not found for deletion", server_id)
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=f"Server with id {server_id} not found"
                 )
 
-            # First, delete all switch-to-server associations
+            # Count switch associations before deleting
+            cur.execute(
+                f"SELECT COUNT(*) as count FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
+                (server_id,)
+            )
+            association_count = cur.fetchone()['count']
+
+            if association_count > 0:
+                logger.info("Deleting %s switch associations for server id=%s",
+                            association_count, server_id)
+
+            # Delete all switch-to-server associations
             cur.execute(
                 f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
                 (server_id,)
@@ -231,3 +278,6 @@ def delete_server(server_id: int):
                 f"DELETE FROM {TABLE_SERVER} WHERE id = %s",
                 (server_id,)
             )
+
+            logger.info("Deleted server id=%s, hostname=%s",
+                        server_id, server['hostname'])
