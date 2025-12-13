@@ -12,7 +12,7 @@ Models:
 """
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class ServerConfiguration(BaseModel):
@@ -20,21 +20,6 @@ class ServerConfiguration(BaseModel):
     cpu_cores: Optional[int] = Field(None, ge=1, le=128, description="CPU cores (1-128)")
     ram_gb: Optional[int] = Field(None, ge=1, le=1024, description="RAM in GB (1-1024)")
     disk_gb: Optional[int] = Field(None, ge=10, le=10000, description="Disk space in GB (10-10000)")
-
-    @field_validator("cpu_cores", mode="after")
-    def validate_cpu_cores(cls, v):  # pylint: disable=no-self-argument
-        """Validate allowed CPU core counts."""
-        if v is not None and v not in [1, 2, 4, 8, 16, 32, 64, 128]:
-            raise ValueError("cpu_cores must be one of: 1, 2, 4, 8, 16, 32, 64, 128")
-        return v
-
-    @field_validator("ram_gb", mode="after")
-    def validate_ram_gb(cls, v):  # pylint: disable=no-self-argument
-        """Validate RAM sizes in GB."""
-        allowed = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024]
-        if v is not None and v not in allowed:
-            raise ValueError(f"ram_gb must be one of: {allowed}")
-        return v
 
 
 class ServerBase(BaseModel):
