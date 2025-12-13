@@ -214,7 +214,7 @@ server-management-api/
 
 ### No ORM Approach
 
-- Direct SQL queries using `psycopg2` as per requirements
+- Direct SQL queries using `asyncpg` as per requirements
 - Parameterized queries to prevent SQL injection
 - Dynamic query building for partial updates
 
