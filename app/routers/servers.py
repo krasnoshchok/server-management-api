@@ -1,31 +1,19 @@
 """
-API endpoints for managing server resources.
+API endpoints for managing server resources (Async Version).
 
-This router provides CRUD operations for servers, allowing retrieval,
-creation, updating, and deletion of individual server records within a
-PostgreSQL database, handling connections via `app.database.get_db_connection`.
+This router provides async CRUD operations for servers.
+All database queries are now non-blocking for better concurrency.
 
-The operations include:
-- GET /servers: Retrieve a list of all servers.
-- GET /servers/{server_id}: Retrieve a specific server by its ID.
-- POST /servers: Create a new server, associating it with an existing datacenter.
-- PUT /servers/{server_id}: Update the details of an existing server.
-- DELETE /servers/{server_id}: Delete a server by its ID.
-
-Data models used:
-- ServerUpdate: Model for updating an existing server (all fields optional).
-- ServerResponse: Model for the server data returned by the API.
-
-Dependencies:
-- fastapi: Core framework for defining the API routes.
-- psycopg2.extras: Used for serializing JSON data (`psycopg2.extras.Json`) into the database.
-- app.database: Provides the database connection utility (`get_db_connection`).
-- app.models: Defines the data structures for server requests and responses.
+Key differences from sync version:
+- All functions are async (async def)
+- Database queries use asyncpg syntax
+- Results are returned as lists of dicts (asyncpg.Record objects)
 """
 import logging
+import json
 from typing import List
+from datetime import datetime
 from fastapi import APIRouter, HTTPException, status
-import psycopg2.extras
 
 from app.database import get_db_connection
 from app.models import ServerBase, ServerUpdate, ServerResponse
@@ -36,245 +24,250 @@ router = APIRouter(
     tags=["servers"]
 )
 
-
-# Setup logging
 logger = logging.getLogger(__name__)
 
 
+def serialize_server(server) -> dict:
+    """Convert asyncpg Record to JSON-serializable dict."""
+    server_dict = dict(server)
+
+    # Handle datetime objects
+    if isinstance(server_dict.get('created_at'), datetime):
+        server_dict['created_at'] = server_dict['created_at'].isoformat()
+    if isinstance(server_dict.get('modified_at'), datetime):
+        server_dict['modified_at'] = server_dict['modified_at'].isoformat()
+
+    # Ensure configuration is a dict (asyncpg should handle this automatically)
+    if isinstance(server_dict.get('configuration'), str):
+        server_dict['configuration'] = json.loads(server_dict['configuration'])
+
+    # If configuration is None or empty, use empty dict
+    if not server_dict.get('configuration'):
+        server_dict['configuration'] = {}
+
+    return server_dict
+
+
 @router.get("/", response_model=List[ServerResponse])
-def get_all_servers(skip: int = 0, limit: int = 100):
+async def get_all_servers(skip: int = 0, limit: int = 100):
     """
-    Retrieve servers from the database with pagination.
+    Retrieve servers from the database with pagination (Async).
 
-    - **skip**: Number of records to skip (default: 0)
-    - **limit**: Maximum number of records to return (default: 100, max: 1000)
-
-    Returns a paginated list of servers.
+    Now multiple requests can run concurrently without blocking!
     """
-    # Validate limit to prevent abuse
     limit = min(limit, 1000)
 
-    logging.info("Fetching servers with skip=%(skip)s, limit=%(limit)s",
-                 {"skip": skip, "limit": limit})
+    logger.info("Fetching servers with skip=%s, limit=%s", skip, limit)
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT id, hostname, configuration, datacenter_id, 
-                       created_at, modified_at
-                FROM {TABLE_SERVER}
-                ORDER BY id
-                LIMIT %s OFFSET %s
-            """, (limit, skip))
-            servers = cur.fetchall()
+    async with get_db_connection() as conn:
+        # asyncpg uses $1, $2 for parameters instead of %s
+        servers = await conn.fetch(f"""
+            SELECT id, hostname, configuration, datacenter_id, 
+                   created_at, modified_at
+            FROM {TABLE_SERVER}
+            ORDER BY id
+            LIMIT $1 OFFSET $2
+        """, limit, skip)
 
-            logger.info("Retrieved %s servers", len(servers))
+        logger.info("Retrieved %s servers", len(servers))
 
-            return servers
+        return [serialize_server(server) for server in servers]
 
 
 @router.get("/{server_id}", response_model=ServerResponse)
-def get_server(server_id: int):
+async def get_server(server_id: int):
     """
-    Retrieve a single server by ID.
-
-    - **server_id**: The ID of the server to retrieve
+    Retrieve a single server by ID (Async).
     """
     logger.info("Fetching server with id=%s", server_id)
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT id, hostname, configuration, datacenter_id,
-                       created_at, modified_at
-                FROM {TABLE_SERVER}
-                WHERE id = %s
-            """, (server_id,))
-            server = cur.fetchone()
+    async with get_db_connection() as conn:
+        # fetchrow returns a single row or None
+        server = await conn.fetchrow(f"""
+            SELECT id, hostname, configuration, datacenter_id,
+                   created_at, modified_at
+            FROM {TABLE_SERVER}
+            WHERE id = $1
+        """, server_id)
 
-            if not server:
-                logger.warning("Server with id=%s not found", server_id)
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Server with id {server_id} not found"
-                )
+        if not server:
+            logger.warning("Server with id=%s not found", server_id)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Server with id {server_id} not found"
+            )
 
-            logger.info("Retrieved server: %s (id=%s)", server['hostname'], server_id)
-            return server
+        logger.info("Retrieved server: %s (id=%s)", server['hostname'], server_id)
+        return serialize_server(server)
 
 
 @router.post("/", response_model=ServerResponse, status_code=status.HTTP_201_CREATED)
-def create_server(server: ServerBase):
+async def create_server(server: ServerBase):
     """
-    Add a new server to a datacenter.
-
-    - **hostname**: Server hostname (required)
-    - **configuration**: Server hardware configuration (optional)
-        - cpu_cores: 1-128 (must be power of 2)
-        - ram_gb: 1-1024
-        - disk_gb: 10-10000
-    - **datacenter_id**: ID of the datacenter (required)
+    Add a new server to a datacenter (Async).
     """
     logger.info("Creating server: hostname=%s, datacenter_id=%s",
                 server.hostname, server.datacenter_id)
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            # Check if datacenter exists
-            cur.execute(f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
-                        (server.datacenter_id,))
-            if not cur.fetchone():
-                logger.error("Datacenter with id=%s does not exist", server.datacenter_id)
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Datacenter with id {server.datacenter_id} does not exist"
-                )
+    async with get_db_connection() as conn:
+        # Check if datacenter exists
+        datacenter = await conn.fetchrow(
+            f"SELECT id FROM {TABLE_DATACENTER} WHERE id = $1",
+            server.datacenter_id
+        )
 
-            # Convert Pydantic model to dict for storage
-            config_dict = server.configuration.model_dump(exclude_none=True)
+        if not datacenter:
+            logger.error("Datacenter with id=%s does not exist", server.datacenter_id)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Datacenter with id {server.datacenter_id} does not exist"
+            )
 
-            # Insert server
-            cur.execute(f"""
-                INSERT INTO {TABLE_SERVER} (hostname, configuration, datacenter_id)
-                VALUES (%s, %s, %s)
-                RETURNING id, hostname, configuration, datacenter_id, 
-                          created_at, modified_at
-            """, (
-                server.hostname,
-                psycopg2.extras.Json(config_dict),
-                server.datacenter_id
-            ))
+        # Convert Pydantic model to dict for storage
+        config_dict = server.configuration.model_dump(exclude_none=True)
 
-            new_server = cur.fetchone()
-            logger.info("Created server with id=%s, hostname=%s",
-                        new_server['id'], new_server['hostname'])
+        # Insert server - asyncpg needs JSON as string with ::jsonb cast
+        new_server = await conn.fetchrow(f"""
+            INSERT INTO {TABLE_SERVER} (hostname, configuration, datacenter_id)
+            VALUES ($1, $2::jsonb, $3)
+            RETURNING id, hostname, configuration, datacenter_id, 
+                      created_at, modified_at
+        """, server.hostname, json.dumps(config_dict), server.datacenter_id)
 
-            return new_server
+        logger.info("Created server with id=%s, hostname=%s",
+                    new_server['id'], new_server['hostname'])
+
+        return serialize_server(new_server)
 
 
 @router.put("/{server_id}", response_model=ServerResponse)
-def update_server(server_id: int, server: ServerUpdate):
-    """Update an existing server."""
+async def update_server(server_id: int, server: ServerUpdate):
+    """
+    Update an existing server (Async).
+    """
     logger.info("Updating server id=%s", server_id)
 
-    # Define allowed fields with their column names
     allowed_fields = {
         'hostname': 'hostname',
         'configuration': 'configuration',
         'datacenter_id': 'datacenter_id'
     }
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            # Build update fields and params
-            update_fields = []
-            params = []
+    async with get_db_connection() as conn:
+        # Build update fields and params
+        update_fields = []
+        params = []
+        param_index = 1
 
-            # Get only the fields that were provided (not None)
-            update_data = server.model_dump(exclude_unset=True)
-            logger.debug("Update data for server id=%s: %s", server_id, update_data)
+        update_data = server.model_dump(exclude_unset=True)
+        logger.debug("Update data for server id=%s: %s", server_id, update_data)
 
-            for field_name, value in update_data.items():
-                if field_name in allowed_fields:
-                    column_name = allowed_fields[field_name]
+        for field_name, value in update_data.items():
+            if field_name in allowed_fields:
+                column_name = allowed_fields[field_name]
 
-                    # Special handling for datacenter_id validation
-                    if field_name == 'datacenter_id':
-                        cur.execute(
-                            f"SELECT id FROM {TABLE_DATACENTER} WHERE id = %s",
-                            (value,)
+                # Special handling for datacenter_id validation
+                if field_name == 'datacenter_id':
+                    datacenter = await conn.fetchrow(
+                        f"SELECT id FROM {TABLE_DATACENTER} WHERE id = $1",
+                        value
+                    )
+                    if not datacenter:
+                        logger.error("Datacenter with id=%s does not exist", value)
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Datacenter with id {value} does not exist"
                         )
-                        if not cur.fetchone():
-                            logger.error("Datacenter with id=%s does not exist", value)
-
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail=f"Datacenter with id {value} does not exist"
-                            )
-
-                    # Special handling for configuration JSON
-                    if field_name == 'configuration':
-                        value = psycopg2.extras.Json(value)
-
-                    update_fields.append(f"{column_name} = %s")
+                    update_fields.append(f"{column_name} = ${param_index}")
                     params.append(value)
+                    param_index += 1
 
-            if not update_fields:
-                logger.warning("No fields to update for server id=%s", server_id)
+                # Special handling for configuration JSONB
+                elif field_name == 'configuration':
+                    if hasattr(value, 'model_dump'):
+                        value = value.model_dump(exclude_none=True)
+                    # For JSONB columns, cast to jsonb and pass as JSON string
+                    update_fields.append(f"{column_name} = ${param_index}::jsonb")
+                    params.append(json.dumps(value))
+                    param_index += 1
+                    logger.debug("Configuration value to store: %s", json.dumps(value))
 
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="No fields to update"
-                )
+                # Normal fields
+                else:
+                    update_fields.append(f"{column_name} = ${param_index}")
+                    params.append(value)
+                    param_index += 1
 
-            # Add modified timestamp and server_id
-            update_fields.append("modified_at = NOW()")
-            params.append(server_id)
+        if not update_fields:
+            logger.warning("No fields to update for server id=%s", server_id)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No fields to update"
+            )
 
-            # Now it's safe because we've validated all column names
-            query = f"""
-                UPDATE {TABLE_SERVER}
-                SET {', '.join(update_fields)}
-                WHERE id = %s
-                RETURNING id, hostname, configuration, datacenter_id,
-                          created_at, modified_at
-            """
+        # Add modified timestamp and server_id
+        update_fields.append("modified_at = NOW()")
+        params.append(server_id)
 
-            cur.execute(query, params)
-            updated_server = cur.fetchone()
+        query = f"""
+            UPDATE {TABLE_SERVER}
+            SET {', '.join(update_fields)}
+            WHERE id = ${param_index}
+            RETURNING id, hostname, configuration, datacenter_id,
+                      created_at, modified_at
+        """
 
-            if not updated_server:
-                logger.warning("Server with id=%s not found for update", server_id)
+        logger.debug("Executing query: %s with params: %s", query, params)
 
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Server with id {server_id} not found"
-                )
+        updated_server = await conn.fetchrow(query, *params)
 
-            logger.info("Updated server id=%s, hostname=%s",
-                        updated_server['id'], updated_server['hostname'])
-            return updated_server
+        if not updated_server:
+            logger.warning("Server with id=%s not found for update", server_id)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Server with id {server_id} not found"
+            )
+
+        logger.info("Updated server id=%s, hostname=%s",
+                    updated_server['id'], updated_server['hostname'])
+        return serialize_server(updated_server)
 
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_server(server_id: int):
+async def delete_server(server_id: int):
     """
-    Delete a server by ID.
+    Delete a server by ID (Async).
     This will also delete all switch associations for this server.
     """
     logger.info("Deleting server id=%s", server_id)
 
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            # 1. Delete associations first (Blind delete)
-            cur.execute(
-                f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = %s",
-                (server_id,)
+    async with get_db_connection() as conn:
+        # Delete associations first
+        association_result = await conn.execute(
+            f"DELETE FROM {TABLE_SWITCH_TO_SERVER} WHERE server_id = $1",
+            server_id
+        )
+
+        # execute() returns "DELETE N" where N is the row count
+        association_count = int(association_result.split()[-1])
+
+        if association_count > 0:
+            logger.info("Deleted %s switch associations for server id=%s",
+                        association_count, server_id)
+
+        # Delete the server
+        delete_result = await conn.execute(
+            f"DELETE FROM {TABLE_SERVER} WHERE id = $1",
+            server_id
+        )
+
+        deleted_count = int(delete_result.split()[-1])
+
+        if deleted_count == 0:
+            logger.warning("Server with id=%s not found for deletion", server_id)
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Server with id {server_id} not found"
             )
-            association_count = cur.rowcount  # Optimization: Check count after delete
 
-            if association_count > 0:
-                logger.info("Deleted %s switch associations for server id=%s",
-                            association_count, server_id)
-
-            # 2. Delete the server
-            cur.execute(
-                f"DELETE FROM {TABLE_SERVER} WHERE id = %s",
-                (server_id,)
-            )
-
-            # 3. Check if any row was actually deleted to handle 404
-            if cur.rowcount == 0:
-                # If we didn't delete anything here, the server didn't exist
-                logger.warning("Server with id=%s not found for deletion", server_id)
-                # Note: We might have deleted orphan associations above,
-                # but usually FK constraints prevent that scenario.
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Server with id {server_id} not found"
-                )
-
-            conn.commit()
-
-            # Optimization: We removed the initial SELECT, so we cannot log 'hostname' anymore.
-            logger.info("Deleted server id=%s", server_id)
+        logger.info("Deleted server id=%s", server_id)
