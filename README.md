@@ -208,7 +208,7 @@ server-management-api/
 
 ### Database Connection Management
 
-- Used context managers (`@contextmanager`) for automatic connection cleanup
+- Used context managers (`@asynccontextmanager`) for automatic connection cleanup
 - `RealDictCursor` returns query results as dictionaries for easier JSON serialization
 - Manual transaction management (commit/rollback) for better control
 
