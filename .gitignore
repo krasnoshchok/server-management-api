@@ -198,6 +198,22 @@ cython_debug/
 
 # Cursor
 #  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
+
+# -----------------------------------------------------------------------------
+# Terraform & Kubernetes
+# State files and local terraform cache shouldn't be committed.
+*.tfstate
+*.tfstate.*
+.terraform/
+# variable definitions, plan output, etc.
+*.tfvars
+*.tfvars.json
+terraform.tfvars
+
+# kubeconfig (if you store a local copy) and other cluster credentials
+kubeconfig
+
+# -----------------------------------------------------------------------------
 #  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore

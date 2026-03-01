@@ -121,19 +121,28 @@ use [minikube](https://minikube.sigs.k8s.io/).
 
 ### Building the image inside minikube
 
+Because Terraform’s Docker provider may not always match the API version used
+by your Docker daemon (especially when using minikube), we recommend building
+the image manually instead of letting Terraform do it.
+
 ```bash
-# point your shell at minikube's Docker daemon
+# either point your shell at Minikube's daemon and run docker directly:
 eval $(minikube docker-env)
-
-docker build -t server-management-api:latest .
-# you can now undo the env change with "eval $(minikube docker-env -u)"
+docker build -f docker/Dockerfile -t server-management-api:latest .
+# undo the environment change when done
+eval $(minikube docker-env -u)
 ```
 
-Alternatively use the built-in helper:
+or use the minikube helper which avoids changing your shell:
 
 ```bash
-minikube image build -t server-management-api:latest .
+minikube image build -f docker/Dockerfile -t server-management-api:latest .
 ```
+
+Once the image exists in the cluster, run `terraform apply` to create/update the
+Kubernetes resources.  If you prefer to use a remote registry instead, tag and
+push the image there and update the `image` field in the Terraform config
+accordingly.
 
 ### Applying Kubernetes manifests
 
@@ -175,6 +184,95 @@ minikube stop
 
 The `k8s/` directory can be extended with ConfigMaps, secrets or a
 `Job` to seed the database automatically.
+
+## Terraform (infrastructure as code)
+
+You can fully describe the Kubernetes resources (API deployment, database deployment,
+and services) using Terraform so the same configuration can be applied on any machine
+with access to a cluster. The `terraform/` subdirectory contains the complete setup.
+
+### Prerequisites
+
+1. [Install Terraform](https://developer.hashicorp.com/terraform/downloads) (v1.5+ recommended).
+2. A running Kubernetes cluster (e.g. minikube).
+3. `kubectl` configured to point at your target cluster.
+
+### Quick start
+
+#### 1. Build the Docker image in the cluster
+
+```bash
+eval $(minikube docker-env)
+docker build -f docker/Dockerfile -t server-management-api:latest .
+eval $(minikube docker-env -u)  # restore previous env
+```
+
+or use the minikube helper:
+
+```bash
+minikube image build -f docker/Dockerfile -t server-management-api:latest .
+```
+
+#### 2. Deploy via Terraform
+
+```bash
+cd terraform
+terraform init                    # download providers
+terraform plan -out=tfplan        # review changes
+terraform apply tfplan            # create API + database resources
+```
+
+This creates:
+- `server-api` deployment (FastAPI service)
+- `postgres` deployment (database)
+- `server-api` service (NodePort on port 30080)
+- `postgres` service (ClusterIP on port 5432)
+
+#### 3. Initialize the database schema
+
+```bash
+kubectl exec -i deploy/postgres -- \
+    psql -U postgres -d server_management < sql/schema.sql
+```
+
+#### 4. Access the API
+
+```bash
+# Option A: Port-forward the service
+kubectl port-forward svc/server-api 8000:8000
+# Then visit http://localhost:8000 or http://localhost:8000/docs
+
+# Option B: Use the NodePort directly (if networking allows)
+curl http://localhost:30080/health
+```
+
+### Managing the infrastructure
+
+Variables are defined in `variables.tf`. Common operations:
+
+```bash
+# View current outputs
+terraform output
+
+# Update infrastructure after code changes
+terraform plan -out=tfplan && terraform apply tfplan
+
+# Destroy all resources
+terraform destroy
+```
+
+### Extending the configuration
+
+The Terraform setup is minimal but can be extended with:
+- PersistentVolumes for database persistence
+- Secrets for sensitive configuration
+- Ingress rules for cleaner HTTP access
+- RBAC and NetworkPolicies for security
+- HPA (Horizontal Pod Autoscaler) for scaling
+
+For cloud deployments (AWS, GCP, Azure) you can replace the `postgres` deployment
+with a managed database service and push the API image to a container registry
+(ECR, GCR, ACR, etc.).
 
 ### Build using Docker only
 
