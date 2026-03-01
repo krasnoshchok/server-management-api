@@ -94,6 +94,88 @@ The API will be available at `http://localhost:8000`
 
 A Dockerfile and `docker-compose.yml` (now located in the `docker/` subdirectory) are provided to containerize the service and a PostgreSQL instance.
 
+## Kubernetes / Minikube (local cluster)
+
+If you prefer to run the application on a local Kubernetes cluster you can
+use [minikube](https://minikube.sigs.k8s.io/).
+
+### Installing minikube on macOS (M1/Apple Silicon)
+
+1. Install dependencies via Homebrew:
+   ```bash
+   brew install hyperkit docker
+   brew install minikube
+   ```
+   *`docker` is used as the driver by default; hyperkit is optional.*
+
+2. Start the cluster using the Docker driver:
+   ```bash
+   minikube start --driver=docker
+   ```
+
+3. (Optional) Enable addons such as the dashboard or ingress:
+   ```bash
+   minikube addons enable dashboard
+   minikube addons enable ingress
+   ```
+
+### Building the image inside minikube
+
+```bash
+# point your shell at minikube's Docker daemon
+eval $(minikube docker-env)
+
+docker build -t server-management-api:latest .
+# you can now undo the env change with "eval $(minikube docker-env -u)"
+```
+
+Alternatively use the built-in helper:
+
+```bash
+minikube image build -t server-management-api:latest .
+```
+
+### Applying Kubernetes manifests
+
+Manifests live in the `k8s/` directory and include the API deployment,
+Postgres deployment/service, and a NodePort service for the API.
+
+```bash
+kubectl apply -f k8s/
+```
+
+The application will start and expose itself on port **30080** of the
+minikube node. You can access it from the host with:
+
+```bash
+curl http://$(minikube ip):30080/health
+```
+
+or use port‑forwarding:
+
+```bash
+kubectl port-forward svc/server-api 8000:8000
+```
+
+### Initialising the database
+
+Once the Postgres pod is ready run the schema script as before:
+
+```bash
+kubectl exec -i deploy/postgres -- \
+    psql -U postgres -d server_management < sql/schema.sql
+```
+
+### Cleaning up
+
+```bash
+kubectl delete -f k8s/
+minikube stop
+```
+
+The `k8s/` directory can be extended with ConfigMaps, secrets or a
+`Job` to seed the database automatically.
+
 ### Build using Docker only
 
 ```bash
