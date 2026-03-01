@@ -90,6 +90,52 @@ uvicorn app.main:app --reload
 
 The API will be available at `http://localhost:8000`
 
+## Docker Deployment
+
+A Dockerfile and `docker-compose.yml` (now located in the `docker/` subdirectory) are provided to containerize the service and a PostgreSQL instance.
+
+### Build using Docker only
+
+```bash
+# Dockerfile is in docker/ so pass -f or change directory
+docker build -f docker/Dockerfile -t server-management-api .
+```
+
+Run the container with the database connection specified via environment variables:
+
+```bash
+# use the same network or provide a reachable Postgres
+docker run -e DB_HOST=host.docker.internal \
+           -e DB_NAME=server_management \
+           -e DB_USER=postgres \
+           -e DB_PASSWORD=your_password \
+           -e DB_PORT=5432 \
+           -p 8000:8000 \
+           server-management-api
+```
+
+### Using Docker Compose (recommended)
+
+```bash
+# bring up both database and api; compose file is in docker/
+# from project root:
+docker-compose -f docker/docker-compose.yml up --build  # run from project root
+```
+
+- API available at `http://localhost:8000`
+- PostgreSQL listens on `localhost:5432` with credentials shown in `docker-compose.yml`.
+
+Logs are mounted to `./logs` so the host can inspect `app.log`.
+
+After the database container starts you still need to create the tables. You can either run the `sql/schema.sql` from the host against `localhost:5432` or exec into the container:
+
+```bash
+# once compose is running
+docker exec -i $(docker-compose ps -q db) psql -U postgres -d server_management < sql/schema.sql
+```
+
+This will populate the schema and sample data as described above.
+
 ## API Documentation
 
 Once the server is running, access the interactive API documentation:
