@@ -10,10 +10,6 @@ terraform {
       source  = "hashicorp/kubernetes"
       version = "~> 2.0"
     }
-    docker = {
-      source  = "kreuzwerker/docker"
-      version = "~> 2.0"
-    }
   }
 }
 
@@ -47,6 +43,22 @@ resource "kubernetes_secret" "db_credentials" {
   type = "Opaque"
 }
 
+resource "kubernetes_persistent_volume_claim" "postgres_data" {
+  metadata {
+    name = "postgres-data"
+  }
+
+  spec {
+    access_modes = ["ReadWriteOnce"]
+
+    resources {
+      requests = {
+        storage = var.postgres_storage_size
+      }
+    }
+  }
+}
+
 resource "kubernetes_deployment" "api" {
   metadata {
     name = "server-api"
@@ -71,6 +83,14 @@ resource "kubernetes_deployment" "api" {
       }
 
       spec {
+        automount_service_account_token = false
+
+        security_context {
+          seccomp_profile {
+            type = "RuntimeDefault"
+          }
+        }
+
         container {
           name              = "server-api"
           image             = "${var.image_name}:${var.image_tag}"
@@ -78,6 +98,56 @@ resource "kubernetes_deployment" "api" {
 
           port {
             container_port = 8000
+          }
+
+          resources {
+            requests = {
+              cpu    = "100m"
+              memory = "128Mi"
+            }
+            limits = {
+              cpu    = "500m"
+              memory = "512Mi"
+            }
+          }
+
+          security_context {
+            allow_privilege_escalation = false
+
+            capabilities {
+              drop = ["ALL"]
+            }
+          }
+
+          startup_probe {
+            http_get {
+              path = "/health"
+              port = 8000
+            }
+            period_seconds    = 5
+            failure_threshold = 12
+          }
+
+          readiness_probe {
+            http_get {
+              path = "/health"
+              port = 8000
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 10
+            timeout_seconds       = 3
+            failure_threshold     = 3
+          }
+
+          liveness_probe {
+            http_get {
+              path = "/health"
+              port = 8000
+            }
+            initial_delay_seconds = 15
+            period_seconds        = 20
+            timeout_seconds       = 3
+            failure_threshold     = 3
           }
 
           env {
@@ -183,12 +253,65 @@ resource "kubernetes_deployment" "postgres" {
       }
 
       spec {
+        security_context {
+          seccomp_profile {
+            type = "RuntimeDefault"
+          }
+        }
+
         container {
           name  = "postgres"
           image = "postgres:14"
 
           port {
             container_port = 5432
+          }
+
+          resources {
+            requests = {
+              cpu    = "100m"
+              memory = "256Mi"
+            }
+            limits = {
+              cpu    = "500m"
+              memory = "1Gi"
+            }
+          }
+
+          security_context {
+            allow_privilege_escalation = false
+
+            capabilities {
+              drop = ["ALL"]
+            }
+          }
+
+          startup_probe {
+            exec {
+              command = ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            }
+            period_seconds    = 5
+            failure_threshold = 12
+          }
+
+          readiness_probe {
+            exec {
+              command = ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 10
+            timeout_seconds       = 3
+            failure_threshold     = 3
+          }
+
+          liveness_probe {
+            exec {
+              command = ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            }
+            initial_delay_seconds = 20
+            period_seconds        = 20
+            timeout_seconds       = 3
+            failure_threshold     = 3
           }
 
           env {
@@ -227,7 +350,9 @@ resource "kubernetes_deployment" "postgres" {
 
         volume {
           name = "pgdata"
-          empty_dir {}
+          persistent_volume_claim {
+            claim_name = kubernetes_persistent_volume_claim.postgres_data.metadata[0].name
+          }
         }
       }
     }
