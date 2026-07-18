@@ -1,34 +1,39 @@
-# lightweight python image
-FROM python:3.11-slim
+FROM python:3.11-slim AS builder
 
-# set working directory
-WORKDIR /app
+WORKDIR /build
 
-# copy requirements first so we can take advantage of layer caching
-COPY requirements.txt ./
-
-# install system dependencies for asyncpg (libpq header)
+# Build dependencies only in builder stage.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc libpq-dev && \
-    pip install --no-cache-dir -r requirements.txt && \
-    apt-get purge -y --auto-remove gcc && \
     rm -rf /var/lib/apt/lists/*
 
-# copy application code
-COPY ./app ./app
-COPY sql ./sql
-# make sure logs directory exists (compose mounts to it later)
-RUN mkdir -p /logs
+COPY requirements.txt ./
+RUN python -m venv /opt/venv && \
+    /opt/venv/bin/pip install --upgrade pip && \
+    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# copy any additional files such as constants, README, etc.
-# (configuration is handled via environment variables; .env is ignored)
+FROM python:3.11-slim AS runtime
 
-# expose port used by uvicorn
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Create a non-root user for safer runtime defaults.
+RUN useradd --create-home --shell /usr/sbin/nologin appuser && \
+    mkdir -p /logs && \
+    chown -R appuser:appuser /app /logs
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --chown=appuser:appuser ./app ./app
+COPY --chown=appuser:appuser ./sql ./sql
+
+USER appuser
+
 EXPOSE 8000
 
-# basic healthcheck ensures the FastAPI app is up
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \
     CMD python -c "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=3).status == 200 else 1)"
 
-# default command
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
