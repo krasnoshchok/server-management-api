@@ -2,162 +2,108 @@
 
 [![CI/CD](https://github.com/krasnoshchok/server-management-api/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/krasnoshchok/server-management-api/actions/workflows/ci-cd.yml)
 
-A RESTful API built with FastAPI for managing servers across multiple datacenters
+FastAPI + PostgreSQL service designed as a DevOps portfolio project: containerized, tested, Kubernetes-ready, Terraform-managed, and CI/CD automated.
 
-## Features
+## Why This Project
 
-- Create, read, update, and delete servers
-- Manage server configurations as JSON
-- Link servers to datacenters
-- Comprehensive API documentation with Swagger UI
-- Health check endpoint
+This repository demonstrates practical DevOps engineering skills, not just API coding:
 
-## Prerequisites
+- Async Python service with real database interactions.
+- Reproducible Docker image with multi-stage build and non-root runtime.
+- Kubernetes deployment with probes, resource limits, secrets, and persistent storage.
+- Terraform-based infrastructure definition for cluster resources.
+- CI pipeline with lint + smoke + PostgreSQL integration test.
+- Manual-gated deployment workflow to control costs and risk.
 
-- Python 3.8+
-- PostgreSQL 12+
-- pip (Python package manager)
+## Tech Stack
 
-## Installation
+- Backend: FastAPI, asyncpg, Pydantic
+- Database: PostgreSQL
+- Containerization: Docker, Docker Compose
+- Orchestration: Kubernetes (Minikube-friendly manifests)
+- IaC: Terraform (Kubernetes provider)
+- CI/CD: GitHub Actions + GHCR
 
-### 1. Clone the repository
+## Architecture
 
-```bash
-git clone https://github.com/krasnoshchok/server-management-api.git
-cd server-management-api
+```mermaid
+flowchart LR
+    User[Client] --> API[FastAPI Service]
+    API --> DB[(PostgreSQL)]
+
+    subgraph CI/CD
+      GH[GitHub Actions]
+      GH --> Test[Lint + Tests]
+      GH --> Build[Build & Push Image to GHCR]
+      GH --> Deploy[Manual Deploy Job]
+    end
+
+    Build --> Registry[(GHCR)]
+    Deploy --> K8s[Kubernetes Cluster]
+    Registry --> K8s
+    K8s --> API
+    K8s --> DB
 ```
 
-### 2. Create a virtual environment
+## Resume Signal
+
+If you include this on your resume, these are the strongest talking points:
+
+- Implemented secure secret flow from GitHub Secrets to Kubernetes Secret references.
+- Hardened workloads with startup/readiness/liveness probes and resource governance.
+- Added PVC-backed Postgres storage instead of ephemeral pod volume.
+- Built quality gates in CI with real integration tests against PostgreSQL.
+- Switched deployment to manual trigger to avoid unintended cloud spend.
+
+## Quick Start
+
+### Option A: Docker Compose (fastest local demo)
+
+1. Set environment values:
+
+```bash
+cp .env.example .env
+# edit DB_PASSWORD in .env
+```
+
+2. Start services:
+
+```bash
+docker-compose -f docker/docker-compose.yml up --build
+```
+
+3. Initialize database schema:
+
+```bash
+docker exec -i $(docker-compose -f docker/docker-compose.yml ps -q db) \
+  psql -U postgres -d server_management < sql/schema.sql
+```
+
+4. Open API docs:
+
+- Swagger: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+### Option B: Local Python + local Postgres
 
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-### 3. Install dependencies
-
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
-```
-
-### 4. Setup PostgreSQL database
-
-Create a new database:
-
-```bash
 createdb server_management
-```
-
-### 5. Apply database schema
-
-Run the SQL schema file to create tables:
-
-```bash
 psql server_management < sql/schema.sql
-```
-
-This will create the following tables:
-- `datacenter` - Stores datacenter information
-- `switch` - Network switch information
-- `server` - Server inventory
-- `switch_to_server` - Many-to-many relationship between switches and servers
-
-The schema file also includes sample data for testing.
-
-### 6. Configure environment variables
-
-Create a `.env` file in the project root:
-
-```env
-# Database
-DB_HOST=localhost
-DB_NAME=server_management
-DB_USER=postgres
-DB_PASSWORD=your_password_here
-DB_PORT=5432
-
-
-# Logging
-LOG_LEVEL=INFO
-LOG_FILE=logs/app.log
-```
-
-## Running the Application
-
-Start the development server:
-
-```bash
 uvicorn app.main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`
+### Option C: Kubernetes manifests (Minikube)
 
-## Docker Deployment
-
-A Dockerfile and `docker-compose.yml` (now located in the `docker/` subdirectory) are provided to containerize the service and a PostgreSQL instance.
-
-## Kubernetes / Minikube (local cluster)
-
-If you prefer to run the application on a local Kubernetes cluster you can
-use [minikube](https://minikube.sigs.k8s.io/).
-
-### Installing minikube on macOS (M1/Apple Silicon)
-
-1. Install dependencies via Homebrew:
-   ```bash
-   brew install hyperkit docker
-   brew install minikube
-   ```
-   *`docker` is used as the driver by default; hyperkit is optional.*
-
-2. Start the cluster using the Docker driver:
-   ```bash
-   minikube start --driver=docker
-   ```
-
-3. (Optional) Enable addons such as the dashboard or ingress:
-   ```bash
-   minikube addons enable dashboard
-   minikube addons enable ingress
-   ```
-
-### Building the image inside minikube
-
-Because Terraform’s Docker provider may not always match the API version used
-by your Docker daemon (especially when using minikube), we recommend building
-the image manually instead of letting Terraform do it.
-
-```bash
-# either point your shell at Minikube's daemon and run docker directly:
-eval $(minikube docker-env)
-docker build -f docker/Dockerfile -t server-management-api:latest .
-# undo the environment change when done
-eval $(minikube docker-env -u)
-```
-
-or use the minikube helper which avoids changing your shell:
+1. Build image in Minikube:
 
 ```bash
 minikube image build -f docker/Dockerfile -t server-management-api:latest .
 ```
 
-Once the image exists in the cluster, run `terraform apply` to create/update the
-Kubernetes resources.  If you prefer to use a remote registry instead, tag and
-push the image there and update the `image` field in the Terraform config
-accordingly.
-
-### Applying Kubernetes manifests
-
-Manifests live in the `k8s/` directory and include the API deployment,
-Postgres deployment/service, and a NodePort service for the API.
-
-The manifests include production-oriented hardening defaults:
-- API and Postgres `startupProbe`, `readinessProbe`, and `livenessProbe`
-- CPU/memory requests and limits
-- Restricted container privileges (`allowPrivilegeEscalation: false`, dropped capabilities)
-- Postgres persistent storage via `PersistentVolumeClaim` (`postgres-data`)
-
-Before applying manifests, create a Kubernetes secret for DB credentials:
+2. Create DB secret:
 
 ```bash
 kubectl create secret generic server-management-db \
@@ -169,213 +115,73 @@ kubectl create secret generic server-management-db \
   --from-literal=POSTGRES_PASSWORD=change_me
 ```
 
+3. Apply manifests:
+
 ```bash
 kubectl apply -f k8s/
 ```
 
-The application will start and expose itself on port **30080** of the
-minikube node. You can access it from the host with:
+4. Initialize schema:
 
 ```bash
-curl http://$(minikube ip):30080/health
+kubectl exec -i deploy/postgres -- \
+  psql -U postgres -d server_management < sql/schema.sql
 ```
 
-or use port‑forwarding:
+5. Access service:
 
 ```bash
 kubectl port-forward svc/server-api 8000:8000
 ```
 
-### Initialising the database
+## Kubernetes Hardening Included
 
-Once the Postgres pod is ready run the schema script as before:
+Current manifests include:
 
-```bash
-kubectl exec -i deploy/postgres -- \
-    psql -U postgres -d server_management < sql/schema.sql
-```
+- Startup/readiness/liveness probes for API and Postgres.
+- CPU/memory requests and limits.
+- Secret-based credentials (no plaintext passwords in manifests).
+- Restricted container privileges (`allowPrivilegeEscalation: false`, dropped caps).
+- `RuntimeDefault` seccomp profile.
+- Postgres persistence using PVC (`postgres-data`).
 
-### Cleaning up
+## Terraform Path
 
-```bash
-kubectl delete -f k8s/
-minikube stop
-```
-
-The `k8s/` directory can be extended with ConfigMaps, secrets or a
-`Job` to seed the database automatically.
-
-## Terraform (infrastructure as code)
-
-You can fully describe the Kubernetes resources (API deployment, database deployment,
-and services) using Terraform so the same configuration can be applied on any machine
-with access to a cluster. The `terraform/` subdirectory contains the complete setup.
-
-### Prerequisites
-
-1. [Install Terraform](https://developer.hashicorp.com/terraform/downloads) (v1.5+ recommended).
-2. A running Kubernetes cluster (e.g. minikube).
-3. `kubectl` configured to point at your target cluster.
-
-### Quick start
-
-#### 1. Build the Docker image in the cluster
-
-```bash
-eval $(minikube docker-env)
-docker build -f docker/Dockerfile -t server-management-api:latest .
-eval $(minikube docker-env -u)  # restore previous env
-```
-
-or use the minikube helper:
-
-```bash
-minikube image build -f docker/Dockerfile -t server-management-api:latest .
-```
-
-#### 2. Deploy via Terraform
+Terraform under `terraform/` provisions Kubernetes objects equivalent to the manifests.
 
 ```bash
 cd terraform
-terraform init                    # download providers
-terraform plan -out=tfplan        # review changes
-terraform apply tfplan            # create API + database resources
-```
-
-The Terraform config now expects `db_password` from input (no hardcoded secret):
-
-```bash
+terraform init
 terraform plan -var="db_password=change_me" -out=tfplan
 terraform apply tfplan
 ```
 
-This creates:
-- `server-api` deployment (FastAPI service)
-- `postgres` deployment (database)
-- `server-api` service (NodePort on port 30080)
-- `postgres` service (ClusterIP on port 5432)
+## CI/CD Workflow
 
-#### 3. Initialize the database schema
+Workflow file: `.github/workflows/ci-cd.yml`
 
-```bash
-kubectl exec -i deploy/postgres -- \
-    psql -U postgres -d server_management < sql/schema.sql
-```
+- On push/PR to `main`: run lint + tests.
+- Deploy job: manual trigger only (`workflow_dispatch`).
+- Image publish: GHCR.
+- Cluster access: `KUBECONFIG_BASE64` secret.
 
-#### 4. Access the API
-
-```bash
-# Option A: Port-forward the service
-kubectl port-forward svc/server-api 8000:8000
-# Then visit http://localhost:8000 or http://localhost:8000/docs
-
-# Option B: Use the NodePort directly (if networking allows)
-curl http://localhost:30080/health
-```
-
-### Managing the infrastructure
-
-Variables are defined in `variables.tf`. Common operations:
-
-```bash
-# View current outputs
-terraform output
-
-# Update infrastructure after code changes
-terraform plan -out=tfplan && terraform apply tfplan
-
-# Destroy all resources
-terraform destroy
-```
-
-### Extending the configuration
-
-The Terraform setup is minimal but can be extended with:
-- PersistentVolumes for database persistence
-- Secrets for sensitive configuration
-- Ingress rules for cleaner HTTP access
-- RBAC and NetworkPolicies for security
-- HPA (Horizontal Pod Autoscaler) for scaling
-
-For cloud deployments (AWS, GCP, Azure) you can replace the `postgres` deployment
-with a managed database service and push the API image to a container registry
-(ECR, GCR, ACR, etc.).
-
-### GitHub Actions secrets
-
-For CI/CD deploys, configure these repository secrets:
+Required GitHub Secrets:
 
 - `KUBECONFIG_BASE64`
 - `DB_NAME`
 - `DB_USER`
 - `DB_PASSWORD`
 
-### Build using Docker only
+## API Surface
 
-```bash
-# Dockerfile is in docker/ so pass -f or change directory
-docker build -f docker/Dockerfile -t server-management-api .
-```
+- `GET /health`
+- `GET /servers/`
+- `GET /servers/{server_id}`
+- `POST /servers/`
+- `PUT /servers/{server_id}`
+- `DELETE /servers/{server_id}`
 
-Run the container with the database connection specified via environment variables:
-
-```bash
-# use the same network or provide a reachable Postgres
-docker run -e DB_HOST=host.docker.internal \
-           -e DB_NAME=server_management \
-           -e DB_USER=postgres \
-           -e DB_PASSWORD=your_password \
-           -e DB_PORT=5432 \
-           -p 8000:8000 \
-           server-management-api
-```
-
-### Using Docker Compose (recommended)
-
-```bash
-# bring up both database and api; compose file is in docker/
-# from project root:
-docker-compose -f docker/docker-compose.yml up --build  # run from project root
-```
-
-- API available at `http://localhost:8000`
-- PostgreSQL listens on `localhost:5432` with credentials shown in `docker-compose.yml`.
-
-Logs are mounted to `./logs` so the host can inspect `app.log`.
-
-After the database container starts you still need to create the tables. You can either run the `sql/schema.sql` from the host against `localhost:5432` or exec into the container:
-
-```bash
-# once compose is running
-docker exec -i $(docker-compose ps -q db) psql -U postgres -d server_management < sql/schema.sql
-```
-
-This will populate the schema and sample data as described above.
-
-## API Documentation
-
-Once the server is running, access the interactive API documentation:
-
-- **Swagger UI**: http://localhost:8000/docs
-- **ReDoc**: http://localhost:8000/redoc
-
-## API Endpoints
-
-### Health Check
-
-- **GET** `/health` - Verify the service is running
-
-### Server Management
-
-- **GET** `/servers/` - Retrieve all servers
-- **GET** `/servers/{server_id}` - Retrieve a specific server by ID
-- **POST** `/servers/` - Create a new server
-- **PUT** `/servers/{server_id}` - Update an existing server
-- **DELETE** `/servers/{server_id}` - Delete a server
-
-## Usage Examples
-
-### Create a new server
+Example create request:
 
 ```bash
 curl -X POST "http://localhost:8000/servers/" \
@@ -387,195 +193,29 @@ curl -X POST "http://localhost:8000/servers/" \
   }'
 ```
 
-> [!IMPORTANT]
-> **Resource Limits Enforced**
-> The server configuration strictly enforces hardware limits. Invalid values will result in a `400 Bad Request` error.
-> * `cpu_cores`: Must be between **1** and **128**
-> * `ram_gb`: Must be between **1** and **4096**
+## Repository Layout
 
-
-### Get all servers
-
-Get first 100 servers (default):
-```bash
-curl -X GET "http://localhost:8000/servers/"
+```text
+app/                 FastAPI app and routers
+k8s/                 Kubernetes manifests
+docker/              Dockerfile and compose config
+terraform/           Terraform configuration
+sql/                 Schema and seed data
+.github/workflows/   CI/CD pipeline
 ```
 
-Get first 10 servers:
-```bash
-curl -X GET "http://localhost:8000/servers/?limit=10"
-```
+## Development Notes
 
-Get servers 11-20 (skip first 10, return next 10):
-```bash
-curl -X GET "http://localhost:8000/servers/?skip=10&limit=10"
-```
-
-Get servers 101-200:
-```bash
-curl -X GET "http://localhost:8000/servers/?skip=100&limit=100"
-```
-
-### Get a specific server
+- Logging is configurable via environment variables.
+- Integration tests run when `RUN_INTEGRATION_TESTS=1`.
+- Local test command:
 
 ```bash
-curl -X GET "http://localhost:8000/servers/1"
+pytest -q
 ```
 
-### Update a server
+## Next Improvements
 
-```bash
-curl -X PUT "http://localhost:8000/servers/1" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "hostname": "updated-webserver.local.lan",
-    "configuration": {"cpu_cores": 16, "ram_gb": 64}
-  }'
-```
-
-### Delete a server
-
-```bash
-curl -X DELETE "http://localhost:8000/servers/1"
-```
-
-## Project Structure
-```
-server-management-api/
-│
-├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI application entry point
-│   ├── database.py          # Database connection management
-│   ├── models.py            # Pydantic models for validation
-│   ├── constants.py         # Database table constants
-│   ├── logging_config.py    # Logging configuration
-│   └── routers/
-│       ├── __init__.py
-│       └── servers.py       # Server endpoint definitions
-│
-├── logs/
-│   └── app.log              # Application logs (gitignored)
-│
-├── sql/
-│   └── schema.sql           # Database schema and sample data
-│
-├── .env                     # Environment variables (gitignored)
-├── .gitignore
-├── requirements.txt         # Python dependencies
-└── README.md
-```
-
-## Design Decisions
-
-### Database Connection Management
-
-- Used context managers (`@asynccontextmanager`) for automatic connection cleanup
-- `RealDictCursor` returns query results as dictionaries for easier JSON serialization
-- Manual transaction management (commit/rollback) for better control
-
-### No ORM Approach
-
-- Direct SQL queries using `asyncpg` as per requirements
-- Parameterized queries to prevent SQL injection
-- Dynamic query building for partial updates
-
-### API Design
-
-- RESTful conventions (GET, POST, PUT, DELETE)
-- Proper HTTP status codes (200, 201, 204, 400, 404)
-- Comprehensive error handling with descriptive messages
-- Request/response validation using Pydantic models
-
-### JSON Configuration
-
-- Server `configuration` field stored as JSONB in PostgreSQL
-- Flexible schema allows different configurations per server
-- Validated as dictionary type in Pydantic models
-
-## Error Handling
-
-The API returns standard HTTP error codes:
-
-- `200 OK` - Successful GET request
-- `201 Created` - Successful POST request
-- `204 No Content` - Successful DELETE request
-- `400 Bad Request` - Invalid input or missing required fields
-- `404 Not Found` - Resource not found
-- `500 Internal Server Error` - Server-side error
-
-## Testing
-
-You can test the API using:
-
-1. **Swagger UI** at http://localhost:8000/docs (interactive testing)
-2. **curl** commands (see examples above)
-3. **Postman** or similar API clients
-4. **Python requests library**
-
-## Logging
-
-The application includes comprehensive logging for monitoring and debugging.
-
-### Log Configuration
-
-Configure logging in your `.env` file:
-```env
-# Logging (optional)
-LOG_LEVEL=INFO          # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_FILE=logs/app.log   # Leave empty to disable file logging
-```
-
-### Log Levels
-
-- **DEBUG**: Detailed information for diagnosing problems (shows all query details)
-- **INFO**: General informational messages (default, recommended for production)
-- **WARNING**: Warning messages for unexpected events
-- **ERROR**: Error messages for serious problems
-- **CRITICAL**: Critical errors that may cause the application to stop
-
-### Log Output
-
-Logs are written to two locations:
-
-1. **Console/Terminal** - All logs appear in the terminal where you run uvicorn
-2. **Log File** - Persistent logs saved to `logs/app.log` (if configured)
-
-### Viewing Logs
-
-**View logs in real-time:**
-```bash
-tail -f logs/app.log
-```
-
-### Example Log Output
-```
-2024-05-28 15:30:52 - INFO - Fetching servers with skip=0, limit=100
-2024-05-28 15:30:52 - INFO - Retrieved 3 servers
-2024-05-28 15:31:10 - INFO - Creating server: hostname=newserver.local, datacenter_id=1
-2024-05-28 15:31:10 - INFO - Created server with id=4, hostname=newserver.local
-2024-05-28 15:31:45 - WARNING - Server with id=99 not found
-```
-
-## Important Files
-
-The following files are ignored by git (see `.gitignore`):
-- `.env` - Contains sensitive database credentials
-- `logs/` - Log files can grow large and contain sensitive data
-- `__pycache__/` and `*.pyc` - Python bytecode files
-
-## Development
-
-To run in development mode with auto-reload:
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## Notes
-
-- The API follows PEP 8 style guidelines
-- All endpoints include comprehensive docstrings
-- Foreign key constraints are validated before operations
-- Timestamps are automatically managed by PostgreSQL
-- The `modified_at` field is updated on every server update
+- Add coverage threshold enforcement in CI.
+- Add NetworkPolicy manifests for namespace-level traffic control.
+- Add OpenTelemetry/Prometheus instrumentation for runtime observability.
