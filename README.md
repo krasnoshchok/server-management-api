@@ -151,6 +151,12 @@ accordingly.
 Manifests live in the `k8s/` directory and include the API deployment,
 Postgres deployment/service, and a NodePort service for the API.
 
+The manifests include production-oriented hardening defaults:
+- API and Postgres `startupProbe`, `readinessProbe`, and `livenessProbe`
+- CPU/memory requests and limits
+- Restricted container privileges (`allowPrivilegeEscalation: false`, dropped capabilities)
+- Postgres persistent storage via `PersistentVolumeClaim` (`postgres-data`)
+
 Before applying manifests, create a Kubernetes secret for DB credentials:
 
 ```bash
