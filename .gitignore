@@ -209,6 +209,8 @@ cython_debug/
 *.tfvars
 *.tfvars.json
 terraform.tfvars
+*.tfplan
+tfplan
 
 # kubeconfig (if you store a local copy) and other cluster credentials
 kubeconfig
