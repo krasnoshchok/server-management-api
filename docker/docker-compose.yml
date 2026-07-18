@@ -5,9 +5,9 @@ services:
     image: postgres:14
     restart: unless-stopped
     environment:
-      POSTGRES_DB: server_management
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: example
+      POSTGRES_DB: ${DB_NAME:-server_management}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
@@ -24,9 +24,9 @@ services:
       - "8000:8000"
     environment:
       DB_HOST: db
-      DB_NAME: server_management
-      DB_USER: postgres
-      DB_PASSWORD: example
+      DB_NAME: ${DB_NAME:-server_management}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
       DB_PORT: 5432
       LOG_LEVEL: INFO
       LOG_FILE: /logs/app.log

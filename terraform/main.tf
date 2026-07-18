@@ -30,6 +30,23 @@ provider "kubernetes" {
 // If you prefer to push to a registry, simply remove this comment block
 // and adjust the `image` field below accordingly.
 
+resource "kubernetes_secret" "db_credentials" {
+  metadata {
+    name = "server-management-db"
+  }
+
+  data = {
+    DB_NAME           = var.db_name
+    DB_USER           = var.db_user
+    DB_PASSWORD       = var.db_password
+    POSTGRES_DB       = var.db_name
+    POSTGRES_USER     = var.db_user
+    POSTGRES_PASSWORD = var.db_password
+  }
+
+  type = "Opaque"
+}
+
 resource "kubernetes_deployment" "api" {
   metadata {
     name = "server-api"
@@ -69,15 +86,30 @@ resource "kubernetes_deployment" "api" {
           }
           env {
             name  = "DB_NAME"
-            value = "server_management"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.db_credentials.metadata[0].name
+                key  = "DB_NAME"
+              }
+            }
           }
           env {
             name  = "DB_USER"
-            value = "postgres"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.db_credentials.metadata[0].name
+                key  = "DB_USER"
+              }
+            }
           }
           env {
             name  = "DB_PASSWORD"
-            value = "example"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.db_credentials.metadata[0].name
+                key  = "DB_PASSWORD"
+              }
+            }
           }
           env {
             name  = "DB_PORT"
@@ -161,15 +193,30 @@ resource "kubernetes_deployment" "postgres" {
 
           env {
             name  = "POSTGRES_DB"
-            value = "server_management"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.db_credentials.metadata[0].name
+                key  = "POSTGRES_DB"
+              }
+            }
           }
           env {
             name  = "POSTGRES_USER"
-            value = "postgres"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.db_credentials.metadata[0].name
+                key  = "POSTGRES_USER"
+              }
+            }
           }
           env {
             name  = "POSTGRES_PASSWORD"
-            value = "example"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.db_credentials.metadata[0].name
+                key  = "POSTGRES_PASSWORD"
+              }
+            }
           }
 
           volume_mount {

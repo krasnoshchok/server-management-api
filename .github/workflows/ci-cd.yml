@@ -37,6 +37,8 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
+    env:
+      IMAGE: ghcr.io/${{ github.repository }}/server-management-api:latest
 
     steps:
     - uses: actions/checkout@v4
@@ -50,7 +52,6 @@ jobs:
 
     - name: Build and push Docker image
       run: |
-        IMAGE=ghcr.io/${{ github.repository }}/server-management-api:latest
         docker build -f docker/Dockerfile -t $IMAGE .
         docker push $IMAGE
 
@@ -63,9 +64,20 @@ jobs:
       run: |
         mkdir -p ${{ github.workspace }}/.kube
         echo "${{ secrets.KUBECONFIG_BASE64 }}" | base64 --decode > ${{ github.workspace }}/.kube/config
-        export KUBECONFIG=${{ github.workspace }}/.kube/config
+        echo "KUBECONFIG=${{ github.workspace }}/.kube/config" >> $GITHUB_ENV
+
+    - name: Create or update Kubernetes DB secret
+      run: |
+        kubectl create secret generic server-management-db \
+          --from-literal=DB_NAME='${{ secrets.DB_NAME }}' \
+          --from-literal=DB_USER='${{ secrets.DB_USER }}' \
+          --from-literal=DB_PASSWORD='${{ secrets.DB_PASSWORD }}' \
+          --from-literal=POSTGRES_DB='${{ secrets.DB_NAME }}' \
+          --from-literal=POSTGRES_USER='${{ secrets.DB_USER }}' \
+          --from-literal=POSTGRES_PASSWORD='${{ secrets.DB_PASSWORD }}' \
+          --dry-run=client -o yaml | kubectl apply -f -
 
     - name: Deploy to cluster
       run: |
-        kubectl set image deployment/server-api server-api=$IMAGE --record || true
+        kubectl set image deployment/server-api server-api=$IMAGE || true
         kubectl rollout status deployment/server-api

@@ -22,3 +22,21 @@ variable "image_tag" {
   default     = "latest"
 }
 
+variable "db_name" {
+  description = "Database name used by the API and Postgres container."
+  type        = string
+  default     = "server_management"
+}
+
+variable "db_user" {
+  description = "Database user used by the API and Postgres container."
+  type        = string
+  default     = "postgres"
+}
+
+variable "db_password" {
+  description = "Database password used by the API and Postgres container."
+  type        = string
+  sensitive   = true
+}
+

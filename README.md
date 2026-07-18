@@ -149,6 +149,18 @@ accordingly.
 Manifests live in the `k8s/` directory and include the API deployment,
 Postgres deployment/service, and a NodePort service for the API.
 
+Before applying manifests, create a Kubernetes secret for DB credentials:
+
+```bash
+kubectl create secret generic server-management-db \
+  --from-literal=DB_NAME=server_management \
+  --from-literal=DB_USER=postgres \
+  --from-literal=DB_PASSWORD=change_me \
+  --from-literal=POSTGRES_DB=server_management \
+  --from-literal=POSTGRES_USER=postgres \
+  --from-literal=POSTGRES_PASSWORD=change_me
+```
+
 ```bash
 kubectl apply -f k8s/
 ```
@@ -222,6 +234,13 @@ terraform plan -out=tfplan        # review changes
 terraform apply tfplan            # create API + database resources
 ```
 
+The Terraform config now expects `db_password` from input (no hardcoded secret):
+
+```bash
+terraform plan -var="db_password=change_me" -out=tfplan
+terraform apply tfplan
+```
+
 This creates:
 - `server-api` deployment (FastAPI service)
 - `postgres` deployment (database)
@@ -273,6 +292,15 @@ The Terraform setup is minimal but can be extended with:
 For cloud deployments (AWS, GCP, Azure) you can replace the `postgres` deployment
 with a managed database service and push the API image to a container registry
 (ECR, GCR, ACR, etc.).
+
+### GitHub Actions secrets
+
+For CI/CD deploys, configure these repository secrets:
+
+- `KUBECONFIG_BASE64`
+- `DB_NAME`
+- `DB_USER`
+- `DB_PASSWORD`
 
 ### Build using Docker only
 
