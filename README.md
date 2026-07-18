@@ -1,5 +1,7 @@
 # Server Management API
 
+[![CI/CD](https://github.com/krasnoshchok/server-management-api/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/krasnoshchok/server-management-api/actions/workflows/ci-cd.yml)
+
 A RESTful API built with FastAPI for managing servers across multiple datacenters
 
 ## Features

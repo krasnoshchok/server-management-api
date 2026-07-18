@@ -9,6 +9,27 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_DB: server_management
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d server_management"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_HOST: localhost
+      DB_NAME: server_management
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_PORT: 5432
+      RUN_INTEGRATION_TESTS: "1"
 
     steps:
     - uses: actions/checkout@v4
@@ -26,12 +47,20 @@ jobs:
     - name: Lint & type check
       run: |
         pip install ruff
-        ruff check app
+        ruff check app tests
+
+    - name: Install PostgreSQL client
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client
+
+    - name: Prepare test database schema
+      run: |
+        PGPASSWORD=$DB_PASSWORD psql -h $DB_HOST -U $DB_USER -d $DB_NAME -f sql/schema.sql
 
     - name: Run tests
       run: |
-        # example placeholder, add real tests if you have them
-        echo "No tests configured yet"
+        pytest -q
 
   build-push-deploy:
     needs: build-and-test
