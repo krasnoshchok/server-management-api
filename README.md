@@ -87,9 +87,9 @@ docker exec -i $(docker-compose -f docker/docker-compose.yml ps -q db) \
 ### Option B: Local Python + local Postgres
 
 ```bash
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+uv venv
+source .venv/bin/activate
+uv pip install --python .venv/bin/python --requirement requirements.lock
 createdb server_management
 psql server_management < sql/schema.sql
 uvicorn app.main:app --reload
@@ -208,10 +208,11 @@ sql/                 Schema and seed data
 
 - Logging is configurable via environment variables.
 - Integration tests run when `RUN_INTEGRATION_TESTS=1`.
+- Dependency install is managed via `uv` and `requirements.lock`.
 - Local test command:
 
 ```bash
-pytest -q
+uv run --python .venv/bin/python pytest -q
 ```
 
 ## Next Improvements

@@ -2,15 +2,16 @@ FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
+COPY --from=ghcr.io/astral-sh/uv:0.5.31 /uv /usr/local/bin/uv
+
 # Build dependencies only in builder stage.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc libpq-dev && \
     rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt ./
-RUN python -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+COPY requirements.lock ./
+RUN uv venv /opt/venv && \
+    uv pip install --python /opt/venv/bin/python --requirement requirements.lock --no-cache
 
 FROM python:3.11-slim AS runtime
 
